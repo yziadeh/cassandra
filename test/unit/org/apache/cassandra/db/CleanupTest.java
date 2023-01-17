@@ -24,6 +24,7 @@ import java.nio.ByteBuffer;
 import java.util.AbstractMap;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -38,6 +39,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
+import org.apache.cassandra.db.compaction.CleanupProgressInfo;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.schema.ColumnMetadata;
@@ -53,6 +55,7 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.locator.AbstractNetworkTopologySnitch;
 import org.apache.cassandra.locator.TokenMetadata;
 import org.apache.cassandra.schema.KeyspaceParams;
+import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
@@ -117,13 +120,14 @@ public class CleanupTest
     }
 
     @Test
-    public void testCleanup() throws ExecutionException, InterruptedException
+    public void testCleanup() throws IOException, ExecutionException, InterruptedException
     {
         StorageService.instance.getTokenMetadata().clearUnsafe();
 
         Keyspace keyspace = Keyspace.open(KEYSPACE1);
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF_STANDARD1);
 
+        CleanupProgressInfo cpi = new CleanupProgressInfo(new LinkedHashSet<>());
 
         // insert data and verify we get it back w/ range query
         fillCF(cfs, "val", LOOPS);
@@ -134,7 +138,7 @@ public class CleanupTest
         assertEquals(LOOPS, Util.getAll(Util.cmd(cfs).build()).size());
 
         // with one token in the ring, owned by the local node, cleanup should be a no-op
-        CompactionManager.instance.performCleanup(cfs, 2);
+        CompactionManager.instance.performCleanup(cfs, 2, cpi);
 
         // ensure max timestamp of the sstables are retained post-cleanup
         assert expectedMaxTimestamps.equals(getMaxTimestampList(cfs));
@@ -148,7 +152,7 @@ public class CleanupTest
     {
         Keyspace keyspace = Keyspace.open(KEYSPACE1);
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF_INDEXED1);
-
+        CleanupProgressInfo cpi = new CleanupProgressInfo(new LinkedHashSet<>());
 
         // insert data and verify we get it back w/ range query
         fillCF(cfs, "birthdate", LOOPS);
@@ -173,7 +177,7 @@ public class CleanupTest
         tmd.updateNormalToken(new BytesToken(tk1), InetAddressAndPort.getByName("127.0.0.1"));
         tmd.updateNormalToken(new BytesToken(tk2), InetAddressAndPort.getByName("127.0.0.2"));
 
-        CompactionManager.instance.performCleanup(cfs, 2);
+        CompactionManager.instance.performCleanup(cfs, 2, cpi);
 
         // row data should be gone
         assertEquals(0, Util.getAll(Util.cmd(cfs).build()).size());
@@ -192,6 +196,7 @@ public class CleanupTest
 
         Keyspace keyspace = Keyspace.open(KEYSPACE1);
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF_STANDARD1);
+        CleanupProgressInfo cpi = new CleanupProgressInfo(new LinkedHashSet<>());
 
         // insert data and verify we get it back w/ range query
         fillCF(cfs, "val", LOOPS);
@@ -204,7 +209,7 @@ public class CleanupTest
         tk2[0] = 1;
         tmd.updateNormalToken(new BytesToken(tk1), InetAddressAndPort.getByName("127.0.0.1"));
         tmd.updateNormalToken(new BytesToken(tk2), InetAddressAndPort.getByName("127.0.0.2"));
-        CompactionManager.instance.performCleanup(cfs, 2);
+        CompactionManager.instance.performCleanup(cfs, 2, cpi);
 
         assertEquals(0, Util.getAll(Util.cmd(cfs).build()).size());
     }
@@ -234,6 +239,7 @@ public class CleanupTest
         Keyspace keyspace = Keyspace.open(KEYSPACE2);
         keyspace.setMetadata(KeyspaceMetadata.create(KEYSPACE2, KeyspaceParams.nts("DC1", 1)));
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF_STANDARD2);
+        CleanupProgressInfo cpi = new CleanupProgressInfo(new LinkedHashSet<>());
 
         // insert data and verify we get it back w/ range query
         fillCF(cfs, "val", LOOPS);
@@ -250,30 +256,31 @@ public class CleanupTest
         }
         else
         {
-            CompactionManager.instance.performCleanup(cfs, 2);
+            CompactionManager.instance.performCleanup(cfs, 2, cpi);
         }
         assertEquals(0, Util.getAll(Util.cmd(cfs).build()).size());
         assertTrue(cfs.getLiveSSTables().isEmpty());
     }
 
     @Test
-    public void testCleanupSkippingSSTables() throws UnknownHostException, ExecutionException, InterruptedException
+    public void testCleanupSkippingSSTables() throws IOException, UnknownHostException, ExecutionException, InterruptedException
     {
         testCleanupSkippingSSTablesHelper(false);
     }
 
     @Test
-    public void testCleanupSkippingRepairedSSTables() throws UnknownHostException, ExecutionException, InterruptedException
+    public void testCleanupSkippingRepairedSSTables() throws IOException, UnknownHostException, ExecutionException, InterruptedException
     {
         testCleanupSkippingSSTablesHelper(true);
     }
 
-    public void testCleanupSkippingSSTablesHelper(boolean repaired) throws UnknownHostException, ExecutionException, InterruptedException
+    public void testCleanupSkippingSSTablesHelper(boolean repaired) throws IOException, UnknownHostException, ExecutionException, InterruptedException
     {
         Keyspace keyspace = Keyspace.open(KEYSPACE3);
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF_STANDARD3);
         cfs.disableAutoCompaction();
         TokenMetadata tmd = StorageService.instance.getTokenMetadata();
+        CleanupProgressInfo cpi = new CleanupProgressInfo(new LinkedHashSet<>());
         tmd.clearUnsafe();
         tmd.updateNormalToken(token(new byte[]{ 50 }), InetAddressAndPort.getByName("127.0.0.1"));
 
@@ -303,11 +310,11 @@ public class CleanupTest
             });
         }
         // single token - 127.0.0.1 owns everything, cleanup should be noop
-        cfs.forceCleanup(2);
+        cfs.forceCleanup(2, cpi);
         assertEquals(beforeFirstCleanup, cfs.getLiveSSTables());
         tmd.updateNormalToken(token(new byte[]{ 120 }), InetAddressAndPort.getByName("127.0.0.2"));
 
-        cfs.forceCleanup(2);
+        cfs.forceCleanup(2, cpi);
         for (SSTableReader sstable : cfs.getLiveSSTables())
         {
             assertEquals(sstable.first, sstable.last); // single-token sstables

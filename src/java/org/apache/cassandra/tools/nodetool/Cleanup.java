@@ -22,6 +22,7 @@ import io.airlift.airline.Command;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import io.airlift.airline.Option;
 import org.apache.cassandra.schema.SchemaConstants;
@@ -39,6 +40,11 @@ public class Cleanup extends NodeToolCmd
             description = "Number of sstables to cleanup simultanously, set to 0 to use all available compaction threads")
     private int jobs = 2;
 
+    @Option(title = "status",
+            name = {"-s", "--status"},
+           description = "If a cleanup process is taking place, it will show the current amount of SSTables cleaned up")
+    private boolean status = false;
+
     @Override
     public void execute(NodeProbe probe)
     {
@@ -52,7 +58,23 @@ public class Cleanup extends NodeToolCmd
 
             try
             {
-                probe.forceKeyspaceCleanup(probe.output().out, jobs, keyspace, tableNames);
+                if (status)
+                {
+                    // Status flag is active, show status of current cleanup or error if no cleanup is happening
+                    try{
+                        Map<String, String> cleanupProgress = probe.getCleanupProgress();
+                        probe.output().err.println("Cleanup Process Running with status flag, fetching progess...");
+                        probe.output().out.println(cleanupProgress.toString());
+                    } catch (NullPointerException e){
+                        probe.output().err.println("Cleanup Process not Running, must be running to fetch status!");
+                        break;
+                    }
+                }
+                else
+                {
+                    probe.output().err.println("Cleanup Process Running without status flag, starting keyspace cleanup...");
+                    probe.forceKeyspaceCleanup(probe.output().out, jobs, keyspace, tableNames);
+                }
             }
             catch (Exception e)
             {

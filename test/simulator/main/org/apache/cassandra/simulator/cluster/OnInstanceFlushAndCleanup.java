@@ -23,6 +23,7 @@ import java.util.function.Function;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.compaction.CleanupProgressInfo;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.distributed.api.IIsolatedExecutor;
 import org.apache.cassandra.simulator.Action;
@@ -41,6 +42,7 @@ class OnInstanceFlushAndCleanup extends ClusterReliableAction
 
     private static IIsolatedExecutor.SerializableRunnable invokableFlushAndCleanup()
     {
+        CleanupProgressInfo cpi = new CleanupProgressInfo(null);
         return () -> {
             for (Keyspace keyspace : Keyspace.all())
             {
@@ -49,7 +51,7 @@ class OnInstanceFlushAndCleanup extends ClusterReliableAction
                     try
                     {
                         Util.flush(cfs);
-                        if (cfs.forceCleanup(1) != CompactionManager.AllSSTableOpStatus.SUCCESSFUL)
+                        if (cfs.forceCleanup(1, cpi) != CompactionManager.AllSSTableOpStatus.SUCCESSFUL)
                             throw new IllegalStateException();
                         cfs.forceMajorCompaction();
                     }

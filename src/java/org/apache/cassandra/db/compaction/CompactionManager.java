@@ -565,7 +565,7 @@ public class CompactionManager implements CompactionManagerMBean
         }, jobs, OperationType.UPGRADE_SSTABLES);
     }
 
-    public AllSSTableOpStatus performCleanup(final ColumnFamilyStore cfStore, int jobs) throws InterruptedException, ExecutionException
+    public AllSSTableOpStatus performCleanup(final ColumnFamilyStore cfStore, int jobs, CleanupProgressInfo currentCleanup) throws InterruptedException, ExecutionException
     {
         assert !cfStore.isIndex();
         Keyspace keyspace = cfStore.keyspace;
@@ -615,6 +615,7 @@ public class CompactionManager implements CompactionManagerMBean
                 logger.info("Skipping cleanup for {}/{} sstables for {}.{} since they are fully contained in owned ranges (full ranges: {}, transient ranges: {})",
                             skippedSStables, totalSSTables, cfStore.keyspace.getName(), cfStore.getTableName(), fullRanges, transientRanges);
                 sortedSSTables.sort(SSTableReader.sizeComparator);
+                currentCleanup.onCleanupNewTable(cfStore.metadata.id, sortedSSTables.size());
                 return sortedSSTables;
             }
 
@@ -623,6 +624,7 @@ public class CompactionManager implements CompactionManagerMBean
             {
                 CleanupStrategy cleanupStrategy = CleanupStrategy.get(cfStore, allRanges, transientRanges, txn.onlyOne().isRepaired(), FBUtilities.nowInSeconds());
                 doCleanupOne(cfStore, txn, cleanupStrategy, replicas.ranges(), hasIndexes);
+                currentCleanup.onCleanupNewSSTable();
             }
         }, jobs, OperationType.CLEANUP);
     }

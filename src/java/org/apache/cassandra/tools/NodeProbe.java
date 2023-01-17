@@ -167,7 +167,7 @@ public class NodeProbe implements AutoCloseable
     public NodeProbe(String host, int port, String username, String password) throws IOException
     {
         assert username != null && !username.isEmpty() && password != null && !password.isEmpty()
-               : "neither username nor password can be blank";
+        : "neither username nor password can be blank";
 
         this.host = host;
         this.port = port;
@@ -282,13 +282,13 @@ public class NodeProbe implements AutoCloseable
         catch (MalformedObjectNameException e)
         {
             throw new RuntimeException(
-                    "Invalid ObjectName? Please report this as a bug.", e);
+            "Invalid ObjectName? Please report this as a bug.", e);
         }
 
         memProxy = ManagementFactory.newPlatformMXBeanProxy(mbeanServerConn,
-                ManagementFactory.MEMORY_MXBEAN_NAME, MemoryMXBean.class);
+                                                            ManagementFactory.MEMORY_MXBEAN_NAME, MemoryMXBean.class);
         runtimeProxy = ManagementFactory.newPlatformMXBeanProxy(
-                mbeanServerConn, ManagementFactory.RUNTIME_MXBEAN_NAME, RuntimeMXBean.class);
+        mbeanServerConn, ManagementFactory.RUNTIME_MXBEAN_NAME, RuntimeMXBean.class);
     }
 
     private RMIClientSocketFactory getRMIClientSocketFactory()
@@ -320,6 +320,11 @@ public class NodeProbe implements AutoCloseable
     public Output output()
     {
         return output;
+    }
+
+    public Map<String, String> getCleanupProgress() throws NullPointerException, IOException, ExecutionException, InterruptedException
+    {
+        return ssProxy.getCleanupProgress();
     }
 
     public int forceKeyspaceCleanup(int jobs, String keyspaceName, String... tables) throws IOException, ExecutionException, InterruptedException

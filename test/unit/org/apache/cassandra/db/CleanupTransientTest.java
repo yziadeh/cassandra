@@ -19,10 +19,12 @@ package org.apache.cassandra.db;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.UUID;
 
+import org.apache.cassandra.db.compaction.CleanupProgressInfo;
 import org.apache.cassandra.locator.RangesAtEndpoint;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -128,9 +130,9 @@ public class CleanupTransientTest
         List<Long> expectedMaxTimestamps = getMaxTimestampList(cfs);
 
         assertEquals(LOOPS, Util.getAll(Util.cmd(cfs).build()).size());
-
+        CleanupProgressInfo cpi = new CleanupProgressInfo(new LinkedHashSet<>());
         // with two tokens RF=2/1 and the sstable not repaired this should do nothing
-        CompactionManager.instance.performCleanup(cfs, 2);
+        CompactionManager.instance.performCleanup(cfs, 2, cpi);
 
         // ensure max timestamp of the sstables are retained post-cleanup
         assert expectedMaxTimestamps.equals(getMaxTimestampList(cfs));
@@ -157,7 +159,8 @@ public class CleanupTransientTest
         sstable.reloadSSTableMetadata();
 
         // This should remove approximately 50% of the data, specifically whatever was transiently replicated
-        CompactionManager.instance.performCleanup(cfs, 2);
+        cpi = new CleanupProgressInfo(new LinkedHashSet<>());
+        CompactionManager.instance.performCleanup(cfs, 2, cpi);
 
         // ensure max timestamp of the sstables are retained post-cleanup
         assert expectedMaxTimestamps.equals(getMaxTimestampList(cfs));

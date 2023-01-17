@@ -38,6 +38,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import java.util.regex.MatchResult;
 import java.util.regex.Pattern;
@@ -64,6 +65,7 @@ import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.concurrent.*;
 import org.apache.cassandra.config.DataStorageSpec;
 import org.apache.cassandra.cql3.QueryHandler;
+import org.apache.cassandra.db.compaction.CleanupProgressInfo;
 import org.apache.cassandra.dht.RangeStreamer.FetchReplica;
 import org.apache.cassandra.fql.FullQueryLogger;
 import org.apache.cassandra.fql.FullQueryLoggerOptions;
@@ -335,6 +337,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     private static final boolean allowSimultaneousMoves = Boolean.parseBoolean(System.getProperty("cassandra.consistent.simultaneousmoves.allow","false"));
     private static final boolean joinRing = Boolean.parseBoolean(System.getProperty("cassandra.join_ring", "true"));
     private boolean replacing;
+
+    private AtomicReference<CleanupProgressInfo> currentCleanup = new AtomicReference<>();
 
     private final StreamStateStore streamStateStore = new StreamStateStore();
 
@@ -3842,6 +3846,10 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         return Gossiper.instance.getCurrentGenerationNumber(FBUtilities.getBroadcastAddressAndPort());
     }
 
+    public Map<String, String> getCleanupProgress() throws NullPointerException, IOException, ExecutionException, InterruptedException{
+        return currentCleanup.get().getMapRepresentation();
+    }
+
     public int forceKeyspaceCleanup(String keyspaceName, String... tables) throws IOException, ExecutionException, InterruptedException
     {
         return forceKeyspaceCleanup(0, keyspaceName, tables);
@@ -3849,16 +3857,28 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public int forceKeyspaceCleanup(int jobs, String keyspaceName, String... tables) throws IOException, ExecutionException, InterruptedException
     {
+        logger.info("\n\n\n\nForce Keyspace Cleanup Called!!!!!!!\n\n\n\n\n");
         if (SchemaConstants.isLocalSystemKeyspace(keyspaceName))
             throw new RuntimeException("Cleanup of the system keyspace is neither necessary nor wise");
+        if (!currentCleanup.compareAndSet(null, new CleanupProgressInfo(null)))
+            throw new RuntimeException("Cannot run cleanup while cleanup is already running");
 
         CompactionManager.AllSSTableOpStatus status = CompactionManager.AllSSTableOpStatus.SUCCESSFUL;
+
+        Set<TableId> validTables = new LinkedHashSet<>();
+        getValidColumnFamilies(false, false, keyspaceName, tables).forEach(cf -> {validTables.add(cf.metadata.id);});
+        logger.info("Creating new CleanupProgressInfo Object");
+
+        currentCleanup.set(new CleanupProgressInfo(validTables));
+
         for (ColumnFamilyStore cfStore : getValidColumnFamilies(false, false, keyspaceName, tables))
         {
-            CompactionManager.AllSSTableOpStatus oneStatus = cfStore.forceCleanup(jobs);
+            CompactionManager.AllSSTableOpStatus oneStatus = cfStore.forceCleanup(jobs, currentCleanup.get());
             if (oneStatus != CompactionManager.AllSSTableOpStatus.SUCCESSFUL)
                 status = oneStatus;
         }
+
+        currentCleanup.set(null);
         return status.statusCode;
     }
 
